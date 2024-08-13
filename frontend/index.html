@@ -1,0 +1,176 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Camera Capture</title>
+    <style>
+        /* Styles for the app */
+        #video {
+            width: 100%;
+            max-width: 600px;
+            display: none;
+        }
+        #canvas, #capturedImage {
+            display: none;
+            width: 100%;
+            max-width: 600px;
+            margin-top: 20px;
+        }
+        #error {
+            color: red;
+        }
+        #loading {
+            display: none;
+            font-weight: bold;
+        }
+        #extractedData {
+            margin-top: 20px;
+            border: 1px solid #ccc;
+            padding: 10px;
+            background-color: #f9f9f9;
+        }
+    </style>
+</head>
+<body>
+
+<button id="openCamera">Open Camera</button>
+<input type="file" id="fileInput" accept="image/*" style="display: none;">
+<button id="uploadImage">Upload Image</button>
+<video id="video" autoplay></video>
+<canvas id="canvas"></canvas>
+<button id="capture" style="display: none;">Capture Image</button>
+<img id="capturedImage" src="" alt="Captured Image" />
+<div id="error"></div>
+<div id="loading">Processing image...</div>
+<div id="extractedData"></div>
+
+<script>
+    const video = document.getElementById('video');
+    const canvas = document.getElementById('canvas');
+    const context = canvas.getContext('2d');
+    const capturedImage = document.getElementById('capturedImage');
+    const errorDiv = document.getElementById('error');
+    const fileInput = document.getElementById('fileInput');
+    const loadingDiv = document.getElementById('loading');
+    const extractedDataDiv = document.getElementById('extractedData');
+
+    // Open camera
+    document.getElementById('openCamera').onclick = async () => {
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+            video.srcObject = stream;
+            video.style.display = 'block';
+            document.getElementById('capture').style.display = 'block';
+            errorDiv.textContent = ''; // Clear any previous error messages
+        } catch (err) {
+            errorDiv.textContent = 'Error accessing the camera: ' + err.message;
+        }
+    };
+
+    // Capture image from camera
+    document.getElementById('capture').onclick = () => {
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        context.drawImage(video, 0, 0);
+        const imageData = canvas.toDataURL('image/jpeg');
+        
+        // Display the captured image
+        capturedImage.src = imageData;
+        capturedImage.style.display = 'block';
+
+        sendImageData(imageData);
+    };
+
+    // Upload image from file
+    document.getElementById('uploadImage').onclick = () => {
+        fileInput.click();
+    };
+
+    fileInput.onchange = (event) => {
+        const file = event.target.files[0];
+        if (file) {
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const imageData = e.target.result;
+
+                // Display the uploaded image
+                capturedImage.src = imageData;
+                capturedImage.style.display = 'block';
+
+                // Send the image data to the backend
+                sendImageData(imageData);
+            };
+            reader.readAsDataURL(file);
+        }
+    };
+
+    function sendImageData(imageData) {
+        loadingDiv.style.display = 'block'; // Show loading indicator
+        errorDiv.textContent = ''; // Clear previous errors
+        extractedDataDiv.innerHTML = ''; // Clear previous data
+
+        fetch('http://127.0.0.1:5000/process-image', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ image_data: imageData })
+        })
+        .then(response => {
+            if (!response.ok) {
+                throw new Error('Network response was not ok ' + response.statusText);
+            }
+            return response.json();
+        })
+        .then(data => {
+            loadingDiv.style.display = 'none'; // Hide loading indicator
+            console.log('Success:', data);
+            
+            // Display the extracted data
+            extractedDataDiv.innerHTML = `
+                <h3>Extracted Data:</h3>
+                <p><strong>Full Data:</strong> ${data.full_data}</p>
+                <p><strong>Supplier Details:</strong> ${JSON.stringify(data.supplier_details)}</p>
+                <p><strong>Retailer Details:</strong> ${JSON.stringify(data.retailer_details)}</p>
+                <p><strong>Table Data:</strong> ${JSON.stringify(data.table_data)}</p>
+            `;
+
+            // Trigger the new API to store data in the database
+            fetch('http://127.0.0.1:5000/store-data', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    full_data: data.full_data,
+                    supplier_details: data.supplier_details,
+                    retailer_details: data.retailer_details,
+                    table_data: data.table_data
+                })
+            })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error('Network response was not ok ' + response.statusText);
+                }
+                return response.json();
+            })
+            .then(storeDataResponse => {
+                console.log('Store Data Response:', storeDataResponse);
+            })
+            .catch(error => {
+                console.error('Error storing data:', error);
+            });
+        })
+        .catch(error => {
+            loadingDiv.style.display = 'none'; // Hide loading indicator
+            console.error('Error processing image:', error);
+            errorDiv.textContent = 'Error processing image: ' + error.message;
+        });
+    }
+</script>
+
+</body>
+</html>
+
